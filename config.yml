@@ -9,3 +9,4 @@ valid_optimizers:
   - gradient_descent
   - gradient_descent_fixed
   - gradient_descent_backtracking_line_search
+batch_size: 400

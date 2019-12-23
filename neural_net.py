@@ -92,14 +92,11 @@ class Word2Vec(object):
             self.b2 = params["b2"]
 
         else:
-            print("starting training")
-
             # create batches
-            random.seed(123)
-            inds = random.sample(list(range(self.X.shape[0])), self.X.shape[0])
-            inds = [[inds[i:i+batch_size]][0] for i in range(0, self.X.shape[0], batch_size)]
-            print(inds)
-
+            # random.seed(123)
+            # inds = random.sample(list(range(self.X.shape[0])), self.X.shape[0])
+            # self.X = self.X[inds]
+            # self.Y = self.Y[inds]
             j = 1
             
             # start time
@@ -112,12 +109,20 @@ class Word2Vec(object):
                 m = [0, 0, 0, 0]
                 v = [0, 0, 0, 0]
 
+            print("start training")            
+
             # iterate over epochs
             for i in range(self.epochs):
-                for batch in inds:
+                for k in range(0, self.X.shape[0], batch_size):
+                    # get indices
+                    temp_X = self.X[k:min(k+batch_size, self.X.shape[0])]
+                    np.random.shuffle(temp_X)
+                    temp_Y = self.Y[k:min(k+batch_size, self.X.shape[0])]
+                    np.random.shuffle(temp_Y)
+
                     # do forward and back propigation on a given batch
-                    p, h = self.forward_propigation(self.X[batch], W1 = self.W1, W2 = self.W2, b1 = self.b1, b2 = self.b2)
-                    self.back_propigation(self.X[batch], self.Y[batch], p, h)
+                    p, h = self.forward_propigation(temp_X, W1 = self.W1, W2 = self.W2, b1 = self.b1, b2 = self.b2)
+                    self.back_propigation(temp_X, temp_Y, p, h)
                     if self.optimizer == "gradient_descent_fixed":
                         self.update_parameters(self.step_size)
                     elif self.optimizer == "gradient_descent":
@@ -135,9 +140,9 @@ class Word2Vec(object):
                         temp_W1 = self.W1.copy()
                         for k in range(3):
                             temp_W1 = temp_W1 - (t*self.dW1)
-                            p_, _ = self.forward_propigation(self.X[batch], W1 = temp_W1, W2 = self.W2, b1 = self.b1, b2 = self.b2)
-                            df = (-1/(self.Y[batch].shape[0])) * (self.Y[batch]*(1-p_))
-                            if self.get_loss(p_, self.Y[batch]) > self.get_loss(p, self.Y[batch]) + alpha*t*-(np.linalg.norm(np.matmul(self.X[batch].T,
+                            p_, _ = self.forward_propigation(temp_X, W1 = temp_W1, W2 = self.W2, b1 = self.b1, b2 = self.b2)
+                            df = (-1/(temp_Y.shape[0])) * (temp_Y*(1-p_))
+                            if self.get_loss(p_, temp_Y) > self.get_loss(p, temp_Y) + alpha*t*-(np.linalg.norm(np.matmul(temp_X.T,
                             np.matmul(df, self.W2.T)))**2):
                                 t = beta*t
                             else:
@@ -149,9 +154,9 @@ class Word2Vec(object):
                         temp_W2 = self.W2.copy()
                         for k in range(3):
                             temp_W2 = temp_W2 - (t*self.dW2)
-                            p_, h_ = self.forward_propigation(self.X[batch], W1 = self.W1, W2 = temp_W2, b1 = self.b1, b2 = self.b2)
-                            df = (-1/(self.Y[batch].shape[0])) * (self.Y[batch]*(1-p_))
-                            if self.get_loss(p_, self.Y[batch]) > self.get_loss(p, self.Y[batch]) + alpha*t*-(np.linalg.norm(np.matmul(h_.T, df))**2):
+                            p_, h_ = self.forward_propigation(temp_X, W1 = self.W1, W2 = temp_W2, b1 = self.b1, b2 = self.b2)
+                            df = (-1/(temp_Y.shape[0])) * (temp_Y*(1-p_))
+                            if self.get_loss(p_, temp_Y) > self.get_loss(p, temp_Y) + alpha*t*-(np.linalg.norm(np.matmul(h_.T, df))**2):
                                 t = beta*t
                             else:
                                 break
@@ -162,9 +167,9 @@ class Word2Vec(object):
                         temp_b1 = self.b1.copy()
                         for k in range(3):
                             temp_b1 = temp_b1 - (t*self.db1)
-                            p_, _ = self.forward_propigation(self.X[batch], W1 = self.W1, W2 = self.W2, b1 = temp_b1, b2 = self.b2)
-                            df = (-1/(self.Y[batch].shape[0])) * (self.Y[batch]*(1-p_))
-                            if self.get_loss(p_, self.Y[batch]) > self.get_loss(p, self.Y[batch]) + alpha*t*-(np.linalg.norm(sum(np.matmul(df, self.W2.T)))**2):
+                            p_, _ = self.forward_propigation(temp_X, W1 = self.W1, W2 = self.W2, b1 = temp_b1, b2 = self.b2)
+                            df = (-1/(temp_Y.shape[0])) * (temp_Y*(1-p_))
+                            if self.get_loss(p_, temp_Y) > self.get_loss(p, temp_Y) + alpha*t*-(np.linalg.norm(sum(np.matmul(df, self.W2.T)))**2):
                                 t = beta*t
                             else:
                                 break
@@ -175,9 +180,9 @@ class Word2Vec(object):
                         temp_b2 = self.b2.copy()
                         for k in range(3):
                             temp_b2 = temp_b2 - (t*self.db2)
-                            p_, _ = self.forward_propigation(self.X[batch], W1 = self.W1, W2 = self.W2, b1 = self.b1, b2 = temp_b2)
-                            df = (-1/(self.Y[batch].shape[0])) * (self.Y[batch]*(1-p_))
-                            if self.get_loss(p_, self.Y[batch]) > self.get_loss(p, self.Y[batch]) + alpha*t*-(np.linalg.norm(sum(df)**2)):
+                            p_, _ = self.forward_propigation(temp_X, W1 = self.W1, W2 = self.W2, b1 = self.b1, b2 = temp_b2)
+                            df = (-1/(temp_Y.shape[0])) * (temp_Y*(1-p_))
+                            if self.get_loss(p_, temp_Y) > self.get_loss(p, temp_Y) + alpha*t*-(np.linalg.norm(sum(df)**2)):
                                 t = beta*t
                             else:
                                 break
@@ -216,7 +221,7 @@ class Word2Vec(object):
 
                     # print loss
                     if j%50 == 0 and self.verbose:
-                        print("iteration: " + str(j) + "/" + str(len(inds)*self.epochs) + "\nloss: " + str(self.get_loss(p, self.Y[batch])))
+                        print("iteration: " + str(j) + "/" + str(len(range(0, self.X.shape[0], batch_size))*self.epochs) + "\nloss: " + str(self.get_loss(p, temp_Y)))
                     j = j+1
             
             # end time
@@ -308,8 +313,8 @@ class SkipGram(Word2Vec):
         self.architecture = "SkipGram"
 
 if __name__ == "__main__":
-    W2V = ContinuousBagOfWords(step_size = .001, optimizer = "adam")
-    W2V.train(batch_size = 100)
+    W2V = SkipGram(step_size = .001, optimizer = "adam")
+    W2V.train(batch_size = config["batch_size"])
     embeddings = W2V.create_embeddings()
     with open(W2V.architecture + ".pkl", 'wb') as f:
         pickle.dump(embeddings, f)
