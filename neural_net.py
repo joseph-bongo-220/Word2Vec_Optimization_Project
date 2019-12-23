@@ -3,17 +3,23 @@ import math
 import re
 import nltk
 from nltk.corpus import brown
+from nltk.tokenize import word_tokenize
 import pickle
 import text_funcs as tf
 import random
 import os
 from os.path import isfile, join
 import time
+from model_config import get_config
+
+config = get_config()
 
 class Word2Vec(object):
-    def __init__(self, embedding_size = 50, epochs = 3, step_size = .01, optimizer = "gradient_descent_fixed", verbose = True, cache = True):
-        # get data
-        self.X, self.Y, self.lookup = tf.get_input_output()
+    def __init__(self, corpus = None, embedding_size = config["embedding_size"], epochs = config["epochs"], step_size = config["step_size"], optimizer = config["optimizer"], verbose = config["verbose"], cache = config["cache"]):
+        # make sure optimizer is valid
+        if optimizer not in config["valid_optimizers"]:
+            raise ValueError("The optimizer that you input is not a valid. Please select a valid optimizer from the list below. \n" 
+            + ", ".join(config["valid_optimizers"]))
 
         # determine size of embedding
         self.embedding_size = embedding_size
@@ -28,20 +34,6 @@ class Word2Vec(object):
         # if output/cache is wanted
         self.verbose = verbose
         self.cache = cache
-
-        # print size of vocab
-        self.V = self.Y.shape[1]
-        print("Vocab: " + str(self.V))
-
-        # randomly initialize weights
-        random.seed(1)
-        self.W1 = np.random.normal(0, .1, [self.V, self.embedding_size])
-        random.seed(2)
-        self.W2 = np.random.normal(0, .1, [self.embedding_size, self.V])
-
-        # Initialize biases to 0
-        self.b1 = np.zeros(self.embedding_size)
-        self.b2 = np.zeros(self.V)
 
     def forward_propigation(self, X, W1, W2, b1, b2, hidden = False):
         """do a forward pass for through the model"""
@@ -89,9 +81,9 @@ class Word2Vec(object):
 
         # if chache exists, use those values
         files = [f for f in os.listdir(".") if isfile(join(".", f))]
-        if self.optimizer+"_cache.pkl" in files:
+        if self.architecture + "_cache.pkl" in files:
             print("recovering cached parameters")
-            with open(self.optimizer+"_cache.pkl", 'rb') as f:
+            with open(self.architecture + "_cache.pkl", 'rb') as f:
                 params = pickle.load(f)
 
             self.W1 = params["W1"]
@@ -100,29 +92,37 @@ class Word2Vec(object):
             self.b2 = params["b2"]
 
         else:
-            print("starting training")
-
             # create batches
-            random.seed(123)
-            inds = random.sample(list(range(self.X.shape[0])), self.X.shape[0])
-            inds = [[inds[i:i+batch_size]] for i in range(0, self.X.shape[0], batch_size)]
+            # random.seed(123)
+            # inds = random.sample(list(range(self.X.shape[0])), self.X.shape[0])
+            # self.X = self.X[inds]
+            # self.Y = self.Y[inds]
             j = 1
             
             # start time
             t0 = time.time()
 
             # initialize Adam parameters
-            a1 = .9
-            a2 = .999
-            m = [0, 0, 0, 0]
-            v = [0, 0, 0, 0]
+            if self.optimizer == "adam":
+                a1 = .9
+                a2 = .999
+                m = [0, 0, 0, 0]
+                v = [0, 0, 0, 0]
+
+            print("start training")            
 
             # iterate over epochs
             for i in range(self.epochs):
-                for batch in inds:
+                for k in range(0, self.X.shape[0], batch_size):
+                    # get indices
+                    temp_X = self.X[k:min(k+batch_size, self.X.shape[0])]
+                    np.random.shuffle(temp_X)
+                    temp_Y = self.Y[k:min(k+batch_size, self.X.shape[0])]
+                    np.random.shuffle(temp_Y)
+
                     # do forward and back propigation on a given batch
-                    p, h = self.forward_propigation(self.X[batch], W1 = self.W1, W2 = self.W2, b1 = self.b1, b2 = self.b2)
-                    self.back_propigation(self.X[batch], self.Y[batch], p, h)
+                    p, h = self.forward_propigation(temp_X, W1 = self.W1, W2 = self.W2, b1 = self.b1, b2 = self.b2)
+                    self.back_propigation(temp_X, temp_Y, p, h)
                     if self.optimizer == "gradient_descent_fixed":
                         self.update_parameters(self.step_size)
                     elif self.optimizer == "gradient_descent":
@@ -140,9 +140,9 @@ class Word2Vec(object):
                         temp_W1 = self.W1.copy()
                         for k in range(3):
                             temp_W1 = temp_W1 - (t*self.dW1)
-                            p_, _ = self.forward_propigation(self.X[batch], W1 = temp_W1, W2 = self.W2, b1 = self.b1, b2 = self.b2)
-                            df = (-1/(self.Y[batch].shape[0])) * (self.Y[batch]*(1-p_))
-                            if self.get_loss(p_, self.Y[batch]) > self.get_loss(p, self.Y[batch]) + alpha*t*-(np.linalg.norm(np.matmul(self.X[batch].T,
+                            p_, _ = self.forward_propigation(temp_X, W1 = temp_W1, W2 = self.W2, b1 = self.b1, b2 = self.b2)
+                            df = (-1/(temp_Y.shape[0])) * (temp_Y*(1-p_))
+                            if self.get_loss(p_, temp_Y) > self.get_loss(p, temp_Y) + alpha*t*-(np.linalg.norm(np.matmul(temp_X.T,
                             np.matmul(df, self.W2.T)))**2):
                                 t = beta*t
                             else:
@@ -154,9 +154,9 @@ class Word2Vec(object):
                         temp_W2 = self.W2.copy()
                         for k in range(3):
                             temp_W2 = temp_W2 - (t*self.dW2)
-                            p_, h_ = self.forward_propigation(self.X[batch], W1 = self.W1, W2 = temp_W2, b1 = self.b1, b2 = self.b2)
-                            df = (-1/(self.Y[batch].shape[0])) * (self.Y[batch]*(1-p_))
-                            if self.get_loss(p_, self.Y[batch]) > self.get_loss(p, self.Y[batch]) + alpha*t*-(np.linalg.norm(np.matmul(h_.T, df))**2):
+                            p_, h_ = self.forward_propigation(temp_X, W1 = self.W1, W2 = temp_W2, b1 = self.b1, b2 = self.b2)
+                            df = (-1/(temp_Y.shape[0])) * (temp_Y*(1-p_))
+                            if self.get_loss(p_, temp_Y) > self.get_loss(p, temp_Y) + alpha*t*-(np.linalg.norm(np.matmul(h_.T, df))**2):
                                 t = beta*t
                             else:
                                 break
@@ -167,9 +167,9 @@ class Word2Vec(object):
                         temp_b1 = self.b1.copy()
                         for k in range(3):
                             temp_b1 = temp_b1 - (t*self.db1)
-                            p_, _ = self.forward_propigation(self.X[batch], W1 = self.W1, W2 = self.W2, b1 = temp_b1, b2 = self.b2)
-                            df = (-1/(self.Y[batch].shape[0])) * (self.Y[batch]*(1-p_))
-                            if self.get_loss(p_, self.Y[batch]) > self.get_loss(p, self.Y[batch]) + alpha*t*-(np.linalg.norm(sum(np.matmul(df, self.W2.T)))**2):
+                            p_, _ = self.forward_propigation(temp_X, W1 = self.W1, W2 = self.W2, b1 = temp_b1, b2 = self.b2)
+                            df = (-1/(temp_Y.shape[0])) * (temp_Y*(1-p_))
+                            if self.get_loss(p_, temp_Y) > self.get_loss(p, temp_Y) + alpha*t*-(np.linalg.norm(sum(np.matmul(df, self.W2.T)))**2):
                                 t = beta*t
                             else:
                                 break
@@ -180,9 +180,9 @@ class Word2Vec(object):
                         temp_b2 = self.b2.copy()
                         for k in range(3):
                             temp_b2 = temp_b2 - (t*self.db2)
-                            p_, _ = self.forward_propigation(self.X[batch], W1 = self.W1, W2 = self.W2, b1 = self.b1, b2 = temp_b2)
-                            df = (-1/(self.Y[batch].shape[0])) * (self.Y[batch]*(1-p_))
-                            if self.get_loss(p_, self.Y[batch]) > self.get_loss(p, self.Y[batch]) + alpha*t*-(np.linalg.norm(sum(df)**2)):
+                            p_, _ = self.forward_propigation(temp_X, W1 = self.W1, W2 = self.W2, b1 = self.b1, b2 = temp_b2)
+                            df = (-1/(temp_Y.shape[0])) * (temp_Y*(1-p_))
+                            if self.get_loss(p_, temp_Y) > self.get_loss(p, temp_Y) + alpha*t*-(np.linalg.norm(sum(df)**2)):
                                 t = beta*t
                             else:
                                 break
@@ -221,7 +221,7 @@ class Word2Vec(object):
 
                     # print loss
                     if j%50 == 0 and self.verbose:
-                        print("iteration: " + str(j) + "/" + str(len(inds)*self.epochs) + "\nloss: " + str(self.get_loss(p, self.Y[batch])))
+                        print("iteration: " + str(j) + "/" + str(len(range(0, self.X.shape[0], batch_size))*self.epochs) + "\nloss: " + str(self.get_loss(p, temp_Y)))
                     j = j+1
             
             # end time
@@ -230,7 +230,7 @@ class Word2Vec(object):
             if self.cache:
                 # cache model parameters
                 cache_data = {"W1": self.W1, "W2": self.W2, "b1": self.b1, "b2": self.b2}
-                with open(W2V.optimizer+"_cache.pkl", 'wb') as f:
+                with open(self.architecture+"_cache.pkl", 'wb') as f:
                     pickle.dump(cache_data, f)
 
             # print run time
@@ -248,19 +248,81 @@ class Word2Vec(object):
             # get hidden layer value
             h = self.forward_propigation(X, W1 = self.W1, W2 = self.W2, b1 = self.b1, b2 = self.b2, hidden=True)
             embeddings.append(h)
-        #return dict{word:embedding}
+        # return dict{word:embedding}
         return  dict(zip(list(self.lookup.values()), embeddings))
 
+class ContinuousBagOfWords(Word2Vec):
+    def __init__(self, corpus = None, embedding_size = 50, epochs = 3, step_size = .01, optimizer = "adam", verbose = True, cache = True):
+        # run init method of paretn class Word2Vec
+        super().__init__(corpus, embedding_size, epochs, step_size, optimizer, verbose, cache)
+
+        # default corpus
+        if corpus is None:
+            tokens = brown.words(categories = "news")[:50000]
+        else:
+            tokens = word_tokenize(corpus)
+
+        # get data
+        self.X, self.Y, self.lookup = tf.get_input_output(tokens)
+
+        # print size of vocab
+        self.V = self.Y.shape[1]
+        print("Vocab: " + str(self.V))
+
+        # randomly initialize weights
+        random.seed(1)
+        self.W1 = np.random.normal(0, .1, [self.V, self.embedding_size])
+        random.seed(2)
+        self.W2 = np.random.normal(0, .1, [self.embedding_size, self.V])
+
+        # Initialize biases to 0
+        self.b1 = np.zeros(self.embedding_size)
+        self.b2 = np.zeros(self.V)
+
+        self.architecture = "ContinuousBagOfWords"
+
+
+class SkipGram(Word2Vec):
+    def __init__(self, corpus = None, embedding_size = 50, epochs = 3, step_size = .01, optimizer = "adam", verbose = True, cache = True):
+        # run init method of paretn class Word2Vec
+        super().__init__(corpus, embedding_size, epochs, step_size, optimizer, verbose, cache)
+
+        # default corpus
+        if corpus is None:
+            tokens = brown.words(categories = "news")[:50000]
+        else:
+            tokens = word_tokenize(corpus)
+
+        # get data
+        self.X, self.Y, self.lookup = tf.get_input_output(tokens, skip_gram = True)
+
+        # print size of vocab
+        self.V = self.Y.shape[1]
+        print("Vocab: " + str(self.V))
+
+        # randomly initialize weights
+        random.seed(1)
+        self.W1 = np.random.normal(0, .1, [self.V, self.embedding_size])
+        random.seed(2)
+        self.W2 = np.random.normal(0, .1, [self.embedding_size, self.V])
+
+        # Initialize biases to 0
+        self.b1 = np.zeros(self.embedding_size)
+        self.b2 = np.zeros(self.V)
+
+        self.architecture = "SkipGram"
+
 if __name__ == "__main__":
-    W2V = Word2Vec(step_size = .001, optimizer = "adam")
-    W2V.train(batch_size = 100)
+    W2V = SkipGram(step_size = .001, optimizer = "adam")
+    W2V.train(batch_size = config["batch_size"])
     embeddings = W2V.create_embeddings()
-    with open(W2V.optimizer+".pkl", 'wb') as f:
+    with open(W2V.architecture + ".pkl", 'wb') as f:
         pickle.dump(embeddings, f)
 
     embedding_list = []
     for key,val in embeddings.items():
-        dot=np.dot(embeddings["bath"], embeddings[key])
-        embedding_list.append(dot/(np.linalg.norm(embeddings["bath"])*np.linalg.norm(embeddings[key])))
+        if key != "bath":
+            dot=np.dot(embeddings["bath"], embeddings[key])
+            embedding_list.append(dot/(np.linalg.norm(embeddings["bath"])*np.linalg.norm(embeddings[key])))
     print(max(embedding_list))
     print(min(embedding_list))

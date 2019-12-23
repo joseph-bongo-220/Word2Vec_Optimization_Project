@@ -1,0 +1,12 @@
+embedding_size: 50
+epochs: 3
+step_size: .01
+optimizer: adam
+verbose: true
+cache: true
+valid_optimizers: 
+  - adam
+  - gradient_descent
+  - gradient_descent_fixed
+  - gradient_descent_backtracking_line_search
+batch_size: 400
