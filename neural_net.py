@@ -1,5 +1,6 @@
 import numpy as np
 import math
+import pandas as pd
 import re
 import nltk
 from nltk.corpus import brown
@@ -11,6 +12,7 @@ import os
 from os.path import isfile, join
 import time
 from model_config import get_config
+from sklearn.metrics.pairwise import cosine_similarity
 
 config = get_config()
 
@@ -312,17 +314,232 @@ class SkipGram(Word2Vec):
 
         self.architecture = "SkipGram"
 
+class SkipGram_NN(Word2Vec):
+    def __init__(self, corpus = None, layers = None, step_size = config["step_size"], optimizer = "adam", verbose = True, cache = True):
+        # set up neural network architecture
+        if layers is None:
+            self.layers = [50]
+        else:
+            self.layers = layers
+
+        epochs = config["epochs"]
+        # run init method of parent class Word2Vec
+        super().__init__(corpus, self.layers[-1], epochs, step_size, optimizer, verbose, cache)
+
+        # default corpus
+        if corpus is None:
+            tokens = brown.words(categories = "news")[:50000]
+        else:
+            tokens = word_tokenize(corpus)
+
+        # get data
+        self.X, self.Y, self.lookup = tf.get_input_output(tokens, skip_gram = True)
+
+        # print size of vocab
+        self.V = self.Y.shape[1]
+        print("Vocab: " + str(self.V))
+
+        # randomly initialize weights
+        self.arch = [self.V] + self.layers + [self.V]
+        self.W = []
+        self.b = []
+        for i in range(len(self.arch) - 1):
+            random.seed(i+1)
+            self.W.append(np.random.normal(0, .1, [self.arch[i], self.arch[i+1]]))
+            self.b.append(np.zeros(self.arch[i+1]))
+        
+        # random.seed(1)
+        # self.W1 = np.random.normal(0, .1, [self.V, self.embedding_size])
+        # random.seed(2)
+        # self.W2 = np.random.normal(0, .1, [self.embedding_size, self.V])
+
+        # # Initialize biases to 0
+        # self.b1 = np.zeros(self.embedding_size)
+        # self.b2 = np.zeros(self.V)
+
+        self.architecture = "SkipGram"
+
+    def forward_propigation(self, X, W, b, hidden = False):
+        """do a forward pass for through the model"""
+        hidden_layers = []
+        h = np.matmul(X, W[0]) + b[0]
+        hidden_layers.append(h)
+
+        for i in range(len(W)-2):
+            h = np.matmul(h, W[i+1]) + b[i+1]
+            hidden_layers.append(h)
+
+        if hidden:
+            # for the creation of the embeddings
+            return h
+        else:
+            f = np.matmul(h, W[-1]) + b[-1]
+            f = f - np.max(f, axis=-1, keepdims=True)
+            ef = np.exp(f)
+            p = ef/ef.sum(axis=1)[:, None]
+            # p[p<1e-10] = 0
+            return p, hidden_layers
+
+    def back_propigation(self, X, Y, p, hidden_layers):    
+        """get the direction of step"""
+        # get derivative of cross entropy
+        df = (-1/(Y.shape[0])) * (Y*(1-p))
+
+        # initialize gradient lists
+        self.dW = [None] * len(self.W)
+        self.db = [None] * len(self.b)
+
+        # set up 
+        self.dW[-1] = np.matmul(hidden_layers[-1].T, df)
+        self.db[-1] = sum(df)
+
+        w = np.matmul(df, self.W[-1].T)
+        for i in range(len(self.W)-2):
+            if i == 0:
+                pass
+            else:
+                w = np.matmul(w, self.W[-(i+1)].T)
+            self.dW[-(i+2)] = np.matmul(hidden_layers[-(i+2)].T, w)
+            # self.db[-(i+2)] = sum(np.matmul(df, w))
+            self.db[-(i+2)] = sum(w)
+
+        if len(self.W) > 2:
+            w = np.matmul(w, self.W[1].T)
+        self.dW[0] = np.matmul(X.T, w)
+        self.db[0] = sum(w)
+
+    def test(self):
+        # do forward and back propigation on a given batch
+        p, h = self.forward_propigation(X = self.X[:20], W = self.W, b = self.b)
+        self.back_propigation(self.X[:20], self.Y[:20], p, h)
+        assert [i.shape for i in self.W] == [i.shape for i in self.dW] 
+        assert [i.shape for i in self.b] == [i.shape for i in self.db]
+        self.update_parameters(1)
+        print("Passed!")
+
+    def update_parameters(self, l):
+        """update parameters of model"""
+        if isinstance(l, int) or isinstance(l, float):
+            self.W = [self.W[i] - l*self.dW[i] for i in range(len(self.W))]
+            self.b = [self.b[i] - l*self.db[i] for i in range(len(self.b))]
+        else:
+            self.W = [self.W[i] - l[i]*self.dW[i] for i in range(len(self.W))]
+            self.b = [self.b[i] - l[len(self.b) + i]*self.db[i] for i in range(len(self.b))]        
+
+    def train(self, batch_size):
+        """train the network"""
+
+        # if chache exists, use those values
+        files = [f for f in os.listdir(".") if isfile(join(".", f))]
+        if self.architecture + "_cache.pkl" in files:
+            print("recovering cached parameters")
+            with open(self.architecture + "_cache.pkl", 'rb') as f:
+                params = pickle.load(f)
+
+            self.W = params["W"]
+            self.b = params["b"]
+
+        else:
+            # create batches
+            # random.seed(123)
+            # inds = random.sample(list(range(self.X.shape[0])), self.X.shape[0])
+            # self.X = self.X[inds]
+            # self.Y = self.Y[inds]
+            j = 1
+            
+            # start time
+            t0 = time.time()
+
+            # initialize Adam parameters
+            if self.optimizer == "adam":
+                a1 = .9
+                a2 = .999
+                m = [0] * (len(self.W) + len(self.b))
+                v = [0] * (len(self.W) + len(self.b))
+
+            print("start training")            
+
+            # iterate over epochs
+            for i in range(self.epochs):
+                for k in range(0, self.X.shape[0], batch_size):
+                    # get indices
+                    temp_X = self.X[k:min(k+batch_size, self.X.shape[0])]
+                    np.random.shuffle(temp_X)
+                    temp_Y = self.Y[k:min(k+batch_size, self.X.shape[0])]
+                    np.random.shuffle(temp_Y)
+
+                    # do forward and back propigation on a given batch
+                    p, h = self.forward_propigation(temp_X, W = self.W, b = self.b)
+                    self.back_propigation(temp_X, temp_Y, p, h)
+                    if self.optimizer == "gradient_descent_fixed":
+                        self.update_parameters(self.step_size)
+                    elif self.optimizer == "gradient_descent":
+                        self.update_parameters(self.step_size/j)
+                    elif self.optimizer == "adam":
+                        # estimate first and second moments
+                        for k in range(len(self.W)):
+                            m[k] = a1 * m[k] + (1-a1) * self.dW[k]
+                            v[k] = a2 * v[k]  + (1-a2) * (self.dW[k]*self.dW[k])
+                            m_hat = m[k]/(1-(a1**(i+1)))
+                            v_hat = v[k]/(1-(a2**(i+1)))
+
+                            # move weight by mean/ standard devations
+                            self.W[k] = self.W[k] - self.step_size*m_hat/((v_hat**.5)+1e-8)
+
+                        # estimate first and second moments
+                        for k in range(len(self.b)):
+                            m[len(self.W) + k] = a1 * m[len(self.W) + k]  + (1-a1) * self.b[k]
+                            v[len(self.W) + k] = a2 * v[len(self.W) + k]  + (1-a2) * (self.b[k]*self.b[k])
+                            m_hat = m[len(self.W) + k]/(1-(a1**(i+1)))
+                            v_hat = v[len(self.W) + k]/(1-(a2**(i+1)))
+                            
+                            # move weight by mean/ standard devations
+                            self.b[k] = self.b[k] - self.step_size*m_hat/((v_hat**.5)+1e-8)
+
+                    # print loss
+                    if j%50 == 0 and self.verbose:
+                        print("iteration: " + str(j) + "/" + str(len(range(0, self.X.shape[0], batch_size))*self.epochs) + "\nloss: " + str(self.get_loss(p, temp_Y)))
+                    j = j+1
+            
+            # end time
+            t1 = time.time()
+
+            if self.cache:
+                # cache model parameters
+                cache_data = {"W": self.W, "b": self.b}
+                with open(self.architecture+"_cache.pkl", 'wb') as f:
+                    pickle.dump(cache_data, f)
+
+            # print run time
+            print("Training Complete\nRun Time: " + str(t1-t0) + " seconds")
+
+    def create_embeddings(self):
+        embeddings = self.W[0] + self.b[0]
+        for i in range(len(self.W) - 2):
+            temp = self.W[i+1] + self.b[i+1]
+            embeddings = np.matmul(embeddings, temp)
+
+        embeddings_df = pd.DataFrame(embeddings)
+        embeddings_df.insert(loc = 0, column = "word", value = list(self.lookup.values()))
+
+        embeddings_df.to_csv("test.csv", index = False)
+        # return dict{word:embedding}
+        return embeddings_df
+        
 if __name__ == "__main__":
-    W2V = SkipGram(step_size = .001, optimizer = "adam")
+    # W2V = SkipGram(step_size = .001, optimizer = "adam")
+    # W2V.train(batch_size = config["batch_size"])
+    # embeddings = W2V.create_embeddings()
+    # with open(W2V.architecture + ".pkl", 'wb') as f:
+    #     pickle.dump(embeddings, f)
+
+    # embedding_list = []
+    # for key,val in embeddings.items():
+    #     if key != "bath":
+    #         dot=np.dot(embeddings["bath"], embeddings[key])
+    #         embedding_list.append(dot/(np.linalg.norm(embeddings["bath"])*np.linalg.norm(embeddings[key])))
+    # print(max(embedding_list))
+    # print(min(embedding_list))
+    W2V = SkipGram_NN(layers = [400, 300, 100], step_size = .01, optimizer = "adam")
     W2V.train(batch_size = config["batch_size"])
     embeddings = W2V.create_embeddings()
-    with open(W2V.architecture + ".pkl", 'wb') as f:
-        pickle.dump(embeddings, f)
-
-    embedding_list = []
-    for key,val in embeddings.items():
-        if key != "bath":
-            dot=np.dot(embeddings["bath"], embeddings[key])
-            embedding_list.append(dot/(np.linalg.norm(embeddings["bath"])*np.linalg.norm(embeddings[key])))
-    print(max(embedding_list))
-    print(min(embedding_list))
