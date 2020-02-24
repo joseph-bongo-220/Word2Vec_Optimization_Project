@@ -1,6 +1,6 @@
 embedding_size: 50
-epochs: 3
-step_size: .01
+epochs: 10
+step_size: .04
 optimizer: adam
 verbose: true
 cache: true
