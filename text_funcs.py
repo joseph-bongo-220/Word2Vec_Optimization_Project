@@ -2,7 +2,29 @@ import numpy as np
 import re
 import nltk
 from nltk.corpus import brown
+from nltk.tokenize import word_tokenize
 import pickle
+
+def embed_text(text, word_to_id):
+    vocab_size = len(word_to_id)
+
+    # tokenize text
+    tokens = word_tokenize(text)
+
+    # clean the tokens to make sure they are appropriate for the modeling
+    tokens = clean_text(tokens)
+
+    # coerce all words to lowercase
+    tokens = [token.lower() for token in tokens]
+
+    # get indices
+    inds = [word_to_id[token] for token in tokens if token in list(word_to_id.keys())]
+
+    # return vector of hot encoded input
+    X = np.zeros(vocab_size)
+    X[np.array(inds)] = 1
+    
+    return X
 
 def clean_text(words):
     """Remove non-ASCII characters from list of tokenized words"""
@@ -87,7 +109,3 @@ def get_input_output(tokens, skip_gram = False):
 
 if __name__ == '__main__':
     X_2, Y_2, id_to_word = get_input_output()
-    print(X_2[0])
-    print(X_2.shape)
-    print(Y_2[0])
-    print(len(Y_2[0]))
