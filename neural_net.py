@@ -75,8 +75,8 @@ class Word2Vec(object):
     def get_loss(self, p, Y):
         """print out loss"""
         N = p.shape[1]
-        loss = -(1/N) * np.sum(np.sum((Y * np.log(p+.001)) + (Y * np.log(p+.001)), axis=0, keepdims=True), axis=1)
-        return loss[0]
+        loss = -(1/N) * np.sum((Y*np.log(p+.001)) + ((1-Y)*np.log((1-p)+.001)))
+        return loss
 
     def train(self, batch_size):
         """train the network"""
@@ -315,7 +315,7 @@ class SkipGram(Word2Vec):
         self.architecture = "SkipGram"
 
 class SkipGram_NN(Word2Vec):
-    def __init__(self, corpus = None, layers = None, step_size = config["step_size"], optimizer = "adam", verbose = True, cache = True):
+    def __init__(self, corpus = None, layers = None, step_size = config["step_size"], optimizer = "adam", verbose = True, cache = config["cache"]):
         # set up neural network architecture
         if layers is None:
             self.layers = [50]
@@ -326,7 +326,6 @@ class SkipGram_NN(Word2Vec):
         # run init method of parent class Word2Vec
         super().__init__(corpus, self.layers[-1], epochs, step_size, optimizer, verbose, cache)
 
-        # default corpus
         if corpus is None:
             tokens = brown.words(categories = "news")[:50000]
         else:
@@ -347,7 +346,7 @@ class SkipGram_NN(Word2Vec):
             random.seed(i+1)
             self.W.append(np.random.normal(0, .1, [self.arch[i], self.arch[i+1]]))
             self.b.append(np.zeros(self.arch[i+1]))
-        
+            
         # random.seed(1)
         # self.W1 = np.random.normal(0, .1, [self.V, self.embedding_size])
         # random.seed(2)
@@ -383,7 +382,8 @@ class SkipGram_NN(Word2Vec):
     def back_propigation(self, X, Y, p, hidden_layers):    
         """get the direction of step"""
         # get derivative of cross entropy
-        df = (-1/(Y.shape[0])) * (Y*(1-p))
+        # df = (-1/(Y.shape[0])) * (Y*(1-p))
+        df = Y-p
 
         # initialize gradient lists
         self.dW = [None] * len(self.W)
@@ -431,7 +431,7 @@ class SkipGram_NN(Word2Vec):
 
         # if chache exists, use those values
         files = [f for f in os.listdir(".") if isfile(join(".", f))]
-        if self.architecture + "_cache.pkl" in files:
+        if self.architecture + "_cache.pkl" in files and self.cache:
             print("recovering cached parameters")
             with open(self.architecture + "_cache.pkl", 'rb') as f:
                 params = pickle.load(f)
@@ -516,15 +516,25 @@ class SkipGram_NN(Word2Vec):
     def create_embeddings(self):
         embeddings = self.W[0] + self.b[0]
         for i in range(len(self.W) - 2):
-            temp = self.W[i+1] + self.b[i+1]
+            if i+1 == len(self.W) - 2:
+                temp = self.W[i+1]
+            else:
+                temp = self.W[i+1] + self.b[i+1]
             embeddings = np.matmul(embeddings, temp)
 
         embeddings_df = pd.DataFrame(embeddings)
         embeddings_df.insert(loc = 0, column = "word", value = list(self.lookup.values()))
 
+
         embeddings_df.to_csv("test.csv", index = False)
         # return dict{word:embedding}
         return embeddings_df
+
+    def embed(self, query):
+        word_to_id = {v: k for k, v in self.lookup.items()}
+        X = tf.embed_text(query, word_to_id)
+        embedding = self.forward_propigation(X = X, W = self.W, b = self.b, hidden = True)
+        return embedding
         
 if __name__ == "__main__":
     # W2V = SkipGram(step_size = .001, optimizer = "adam")
@@ -540,6 +550,7 @@ if __name__ == "__main__":
     #         embedding_list.append(dot/(np.linalg.norm(embeddings["bath"])*np.linalg.norm(embeddings[key])))
     # print(max(embedding_list))
     # print(min(embedding_list))
-    W2V = SkipGram_NN(layers = [400, 300, 100], step_size = .01, optimizer = "adam")
+    W2V = SkipGram_NN(layers = [400, 300, 100], step_size = .01, optimizer = "adam", cache = config["cache"])
     W2V.train(batch_size = config["batch_size"])
+    W2V.embed("The county jury")
     embeddings = W2V.create_embeddings()
