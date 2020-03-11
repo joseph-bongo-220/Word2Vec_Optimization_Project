@@ -12,7 +12,7 @@ import os
 from os.path import isfile, join
 import time
 from model_config import get_config
-from sklearn.metrics.pairwise import cosine_similarity
+from scipy import stats
 
 config = get_config()
 
@@ -370,7 +370,7 @@ class SkipGram_NN(Word2Vec):
 
         if hidden:
             # for the creation of the embeddings
-            return h
+            return hidden_layers
         else:
             f = np.matmul(h, W[-1]) + b[-1]
             f = f - np.max(f, axis=-1, keepdims=True)
@@ -514,17 +514,29 @@ class SkipGram_NN(Word2Vec):
             print("Training Complete\nRun Time: " + str(t1-t0) + " seconds")
 
     def create_embeddings(self):
-        embeddings = self.W[0] + self.b[0]
-        for i in range(len(self.W) - 2):
-            if i+1 == len(self.W) - 2:
-                temp = self.W[i+1]
-            else:
-                temp = self.W[i+1] + self.b[i+1]
-            embeddings = np.matmul(embeddings, temp)
+        # embeddings = .5*self.W[0] + .5*self.W[-1].T
+        embeddings = .5*(self.W[0] + self.b[0]) + .5*(self.W[-1] + self.b[-1]).T
+        print(self.W[1])
+        print(self.b[1])
 
+        embedding_list = []
         embeddings_df = pd.DataFrame(embeddings)
         embeddings_df.insert(loc = 0, column = "word", value = list(self.lookup.values()))
-
+        for i in range(embeddings_df.shape[0]):
+            if embeddings_df["word"][i] != "bath":
+                dot=np.dot(np.array(embeddings_df.iloc[i, 1:]), np.array(embeddings_df.iloc[6286, 1:]))
+                embedding_list.append(dot/(np.linalg.norm(np.array(embeddings_df.iloc[i, 1:])) * np.linalg.norm(np.array(embeddings_df.iloc[6286, 1:]))))
+        print(min(np.array(embedding_list)))
+        print(np.quantile(np.array(embedding_list), .1))
+        print(np.quantile(np.array(embedding_list), .2))
+        print(np.quantile(np.array(embedding_list), .3))
+        print(np.quantile(np.array(embedding_list), .4))
+        print(np.quantile(np.array(embedding_list), .5))
+        print(np.quantile(np.array(embedding_list), .7))
+        print(np.quantile(np.array(embedding_list), .8))
+        print(np.quantile(np.array(embedding_list), .9))
+        print(max(np.array(embedding_list)))
+        print(embeddings_df.head())
 
         embeddings_df.to_csv("test.csv", index = False)
         # return dict{word:embedding}
@@ -534,7 +546,11 @@ class SkipGram_NN(Word2Vec):
         word_to_id = {v: k for k, v in self.lookup.items()}
         X = tf.embed_text(query, word_to_id)
         embedding = self.forward_propigation(X = X, W = self.W, b = self.b, hidden = True)
-        return embedding
+        for i in range(len(embedding)):
+            embedding[i] = embedding[i]/np.std(embedding[i])
+        output = sum(embedding)/len(embedding)
+        print(X)
+        return output
         
 if __name__ == "__main__":
     # W2V = SkipGram(step_size = .001, optimizer = "adam")
@@ -550,7 +566,7 @@ if __name__ == "__main__":
     #         embedding_list.append(dot/(np.linalg.norm(embeddings["bath"])*np.linalg.norm(embeddings[key])))
     # print(max(embedding_list))
     # print(min(embedding_list))
-    W2V = SkipGram_NN(layers = [400, 300, 100], step_size = .01, optimizer = "adam", cache = config["cache"])
+    W2V = SkipGram_NN(layers = [100, 100, 100], step_size = .01, optimizer = "adam", cache = config["cache"])
     W2V.train(batch_size = config["batch_size"])
-    W2V.embed("The county jury")
-    embeddings = W2V.create_embeddings()
+    W2V.create_embeddings()
+    print(W2V.embed("The county of the lake"))

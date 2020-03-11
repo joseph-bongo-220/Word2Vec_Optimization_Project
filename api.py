@@ -21,11 +21,12 @@ class Embed(Resource):
 
 class Train(Resource):
     def get(self):
-        pass
+        return {"status": "TBD"}
 
 # Setup the Api resource routing here
 # Route the URL to the resource
 api.add_resource(Embed, '/embed/<string:text>')
+api.add_resource(Train, '/train')
 
 if __name__ == '__main__':
     app.run(debug=False)
