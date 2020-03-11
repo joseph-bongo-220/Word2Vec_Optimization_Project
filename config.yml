@@ -1,5 +1,5 @@
-embedding_size: 50
-epochs: 10
+embedding_size: 200
+epochs: 5
 step_size: .04
 optimizer: adam
 verbose: true
@@ -9,4 +9,4 @@ valid_optimizers:
   - gradient_descent
   - gradient_descent_fixed
   - gradient_descent_backtracking_line_search
-batch_size: 400
+batch_size: 100
