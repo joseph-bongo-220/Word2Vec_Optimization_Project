@@ -4,6 +4,13 @@ import nltk
 from nltk.corpus import brown
 from nltk.tokenize import word_tokenize
 import pickle
+from collections import Counter
+import boto3
+
+def call_lambda(FunctionName = "getTextData"):
+    client = boto3.client('lambda')
+    response = client.invoke(FunctionName = FunctionName)
+    return response["Payload"].read()
 
 def embed_text(text, word_to_id):
     vocab_size = len(word_to_id)
@@ -19,11 +26,11 @@ def embed_text(text, word_to_id):
 
     # get indices
     inds = [word_to_id[token] for token in tokens if token in list(word_to_id.keys())]
+    inds = dict(Counter(inds))
 
     # return vector of hot encoded input
     X = np.zeros(vocab_size)
-    X[np.array(inds)] = 1
-    
+    X[np.array(list(inds.keys()))] = np.array(list(inds.values()))/len(tokens)
     return X
 
 def clean_text(words):
